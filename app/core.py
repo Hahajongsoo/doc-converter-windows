@@ -84,6 +84,8 @@ def create_synonym_questions_in_range(range_obj, red_word_groups):
     
     sorted_words = [word for word, _ in sorted(word_positions, key=lambda x: x[1])]
     end_position = range_obj.End
+    range_obj.Document.Range(end_position, end_position).InsertAfter("\n")
+    end_position += 1 
     
     for word in sorted_words:
         question_range = range_obj.Document.Range(end_position, end_position)
