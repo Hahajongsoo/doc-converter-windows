@@ -104,8 +104,19 @@ def create_synonym_questions_in_range(range_obj, red_word_groups):
         range_obj.Document.Range(end_position, end_position).InsertAfter("\n")
         end_position += 1  
         if word in rest_map:
-            hints = [hint[0].lower() for hint in rest_map[word] if hint.strip()]
-            hint_text = " → " + "            , ".join(hints)
+            processed_hints = []
+            for hint in rest_map[word]:
+                if not hint.strip():
+                    continue
+                if ' ' in hint:
+                    first_letters = [word[0].lower() for word in hint.split()]
+                    processed_hint = first_letters[0] + ' ' * 8 + first_letters[1] + ' ' * 3
+                else:
+                    processed_hint = hint[0].lower() + ' ' * 12
+                
+                processed_hints.append(processed_hint)
+            
+            hint_text = " → " + ", ".join(processed_hints)
             
             hint_range = range_obj.Document.Range(end_position, end_position)
             hint_range.InsertAfter(hint_text)
@@ -113,10 +124,8 @@ def create_synonym_questions_in_range(range_obj, red_word_groups):
             hint_range.Font.Size = 10
             hint_range.ParagraphFormat.LineSpacing = 24
             end_position = hint_range.End
-            range_obj.Document.Range(end_position, end_position).InsertAfter(" " * 12)
-            end_position += 12  
             range_obj.Document.Range(end_position, end_position).InsertAfter("\n")
-            end_position += 1 
+            end_position += 1
         range_obj.Document.Range(end_position, end_position).InsertAfter("\n")
         end_position += 1 
 
@@ -161,6 +170,8 @@ def create_synonym_questions_from_red_text(word_file_path, red_word_groups):
             table.Delete()
 
         underline_all_fixed_spaces(doc)
+        underline_all_fixed_spaces(doc, 7)
+        underline_all_fixed_spaces(doc, 3)
         
         output_file_path = os.path.splitext(word_file_path)[0] + "_synonym_questions.docx"
         doc.SaveAs(output_file_path)
