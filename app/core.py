@@ -88,9 +88,21 @@ def create_synonym_questions_in_range(range_obj, red_word_groups):
     end_position += 1 
     
     for word in sorted_words:
+        word_range = range_obj.Document.Range(end_position, end_position)
+        word_range.InsertAfter(word)
+        word_range.Font.Bold = True
+        word_range.Font.Italic = True
+        word_range.Font.Underline = True
+        word_range.Font.Name = "함초롬바탕"
+        word_range.Font.Size = 10
+        word_range.ParagraphFormat.LineSpacing = 24
+        end_position = word_range.End
         question_range = range_obj.Document.Range(end_position, end_position)
-        question_range.InsertAfter(f"{word} 의 동의어를 쓰시오.")
+        question_range.InsertAfter(" 의 동의어를 쓰시오.")
         question_range.Font.Name = "함초롬바탕"
+        question_range.Font.Italic = False
+        question_range.Font.Bold = False
+        question_range.Font.Underline = False
         question_range.Font.Size = 10
         question_range.ParagraphFormat.LineSpacing = 24
         end_position = question_range.End
@@ -110,7 +122,7 @@ def create_synonym_questions_in_range(range_obj, red_word_groups):
                     continue
                 if ' ' in hint:
                     first_letters = [word[0].lower() for word in hint.split()]
-                    processed_hint = first_letters[0] + ' ' * 8 + first_letters[1] + ' ' * 3
+                    processed_hint = '    '.join(first_letters) + ' ' * 3
                 else:
                     processed_hint = hint[0].lower() + ' ' * 12
                 
@@ -254,9 +266,9 @@ def hwp_to_docx(input_file_path: str) -> str:
     time.sleep(0.5)
     
     pyautogui.hotkey('ctrl', 'v')
-    time.sleep(1)
+    time.sleep(2)
     pyautogui.press('ctrl')
-    time.sleep(0.5)
+    time.sleep(1)
     pyautogui.press('k')
     time.sleep(0.5)
     
