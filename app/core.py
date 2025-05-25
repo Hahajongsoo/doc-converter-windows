@@ -84,11 +84,25 @@ def create_synonym_questions_in_range(range_obj, red_word_groups):
     
     sorted_words = [word for word, _ in sorted(word_positions, key=lambda x: x[1])]
     end_position = range_obj.End
+    range_obj.Document.Range(end_position, end_position).InsertAfter("\n")
+    end_position += 1 
     
     for word in sorted_words:
+        word_range = range_obj.Document.Range(end_position, end_position)
+        word_range.InsertAfter(word)
+        word_range.Font.Bold = True
+        word_range.Font.Italic = True
+        word_range.Font.Underline = True
+        word_range.Font.Name = "함초롬바탕"
+        word_range.Font.Size = 10
+        word_range.ParagraphFormat.LineSpacing = 24
+        end_position = word_range.End
         question_range = range_obj.Document.Range(end_position, end_position)
-        question_range.InsertAfter(f"{word} 의 동의어를 쓰시오.")
+        question_range.InsertAfter(" 의 동의어를 쓰시오.")
         question_range.Font.Name = "함초롬바탕"
+        question_range.Font.Italic = False
+        question_range.Font.Bold = False
+        question_range.Font.Underline = False
         question_range.Font.Size = 10
         question_range.ParagraphFormat.LineSpacing = 24
         end_position = question_range.End
@@ -102,8 +116,19 @@ def create_synonym_questions_in_range(range_obj, red_word_groups):
         range_obj.Document.Range(end_position, end_position).InsertAfter("\n")
         end_position += 1  
         if word in rest_map:
-            hints = [hint[0].lower() for hint in rest_map[word] if hint.strip()]
-            hint_text = " → " + "            , ".join(hints)
+            processed_hints = []
+            for hint in rest_map[word]:
+                if not hint.strip():
+                    continue
+                if ' ' in hint:
+                    first_letters = [word[0].lower() for word in hint.split()]
+                    processed_hint = '    '.join(first_letters) + ' ' * 3
+                else:
+                    processed_hint = hint[0].lower() + ' ' * 12
+                
+                processed_hints.append(processed_hint)
+            
+            hint_text = " → " + ", ".join(processed_hints)
             
             hint_range = range_obj.Document.Range(end_position, end_position)
             hint_range.InsertAfter(hint_text)
@@ -111,10 +136,8 @@ def create_synonym_questions_in_range(range_obj, red_word_groups):
             hint_range.Font.Size = 10
             hint_range.ParagraphFormat.LineSpacing = 24
             end_position = hint_range.End
-            range_obj.Document.Range(end_position, end_position).InsertAfter(" " * 12)
-            end_position += 12  
             range_obj.Document.Range(end_position, end_position).InsertAfter("\n")
-            end_position += 1 
+            end_position += 1
         range_obj.Document.Range(end_position, end_position).InsertAfter("\n")
         end_position += 1 
 
@@ -159,6 +182,8 @@ def create_synonym_questions_from_red_text(word_file_path, red_word_groups):
             table.Delete()
 
         underline_all_fixed_spaces(doc)
+        underline_all_fixed_spaces(doc, 7)
+        underline_all_fixed_spaces(doc, 3)
         
         output_file_path = os.path.splitext(word_file_path)[0] + "_synonym_questions.docx"
         doc.SaveAs(output_file_path)
@@ -241,9 +266,9 @@ def hwp_to_docx(input_file_path: str) -> str:
     time.sleep(0.5)
     
     pyautogui.hotkey('ctrl', 'v')
-    time.sleep(1)
+    time.sleep(2)
     pyautogui.press('ctrl')
-    time.sleep(0.5)
+    time.sleep(1)
     pyautogui.press('k')
     time.sleep(0.5)
     
