@@ -22,6 +22,7 @@ class HwpManager:
         finally:
             pythoncom.CoUninitialize()
 
+    
 def extract_red_text(hwp):
     table_pos = []
     ctrl = hwp.HeadCtrl
@@ -73,84 +74,143 @@ def extract_red_text(hwp):
         find_replace_pset.IgnoreMessage = 1
         find_replace_pset.FindType = 1
     i = all_results.index([])
-    print(i)
     all_results[i] = table_results
-    print(all_results)
     return all_results
 
+def create_synonym_questions_from_red_text(hwp, all_results):
+    tables = []
+    ctrl = hwp.HeadCtrl
+    while ctrl != None:
+        if ctrl.UserDesc == "표":
+            tables.append(ctrl)
+        ctrl = ctrl.Next
+    tables = tables[3:]
+    
+    for i,table in enumerate(tables):
+        first_words = {}
+        rest_map = {}
+        for group in all_results[i]:
+            if not group:
+                continue
+            first, *rest = group
+            first_words[first] = -1
+            if rest:
+                if isinstance(rest[0], str) and ',' in rest[0]:
+                    rest = [word.strip() for word in rest[0].split(',')]
+                rest_map[first] = rest
+        if i == 0:
+            goto_pset = hwp.HParameterSet.HGotoE
+            hwp.HAction.GetDefault("Goto", goto_pset.HSet)
+            goto_pset.HSet.SetItem("DialogResult", 2)
+            goto_pset.SetSelectionIndex = 1
+            hwp.HAction.Execute("Goto", goto_pset.HSet)
+            spara = hwp.GetPos()[1]
+            spos = hwp.GetPos()[2]
+            hwp.SetPosBySet(tables[0].GetAnchorPos(0))
+            hwp.Run("MoveLeft")
+            epara = hwp.GetPos()[1]
+            epos = hwp.GetPos()[2]
+        else:
+            hwp.HAction.Run("MoveRight")
+            spara = hwp.GetPos()[1]
+            spos = hwp.GetPos()[2]
+            hwp.SetPosBySet(tables[1].GetAnchorPos(0))
+            hwp.Run("MoveLeft")
+            epara = hwp.GetPos()[1]
+            epos = hwp.GetPos()[2]
+
+        hwp.SelectText(spara, spos, epara, epos)
+        hwp.Run("Copy")
+        hwp.Run("FileNewTab")
+        hwp.Run("Paste")
+
+        find_replace_pset = hwp.HParameterSet.HFindReplace
+        word_positions = []
+        for f_word in first_words:
+            hwp.HAction.GetDefault("RepeatFind", find_replace_pset.HSet)
+            find_replace_pset.FindString = f_word
+            find_replace_pset.WholeWordOnly = 1
+            find_replace_pset.IgnoreMessage = 1
+            find_replace_pset.FindCharShape.TextColor = 0
+            hwp.HAction.Execute("RepeatFind", find_replace_pset.HSet)
+            word_positions.append((f_word, hwp.GetPos()))
+            hwp.HAction.Run("CharShapeBold")
+            hwp.HAction.Run("CharShapeItalic")
+            hwp.HAction.Run("CharShapeUnderline")
+        sorted_words = [word for word, _ in sorted(word_positions, key=lambda x: x[1])]
+        hwp.MovePos(3)
+        hwp.HAction.Run("BreakPara")
+        act = hwp.CreateAction("ParagraphShape") 
+        pset = act.CreateSet() 
+        act.GetDefault(pset)  
+        pset.SetItem("LineSpacing", 200) 
+        act.Execute(pset)
+        time.sleep(10)
+        for s_word in sorted_words:
+            hwp.HAction.Run("BreakPara")
+            new_spara, new_spos, new_epara, new_epos = hwp.GetPos()[1], hwp.GetPos()[2], hwp.GetPos()[1], hwp.GetPos()[2] + len(s_word)
+            hwp.HAction.GetDefault("InsertText", hwp.HParameterSet.HInsertText.HSet)
+            hwp.HParameterSet.HInsertText.Text = f"{s_word} 의 동의어를 쓰시오."
+            hwp.HAction.Execute("InsertText", hwp.HParameterSet.HInsertText.HSet)
+            hwp.SelectText(new_spara, new_spos, new_epara, new_epos)
+            hwp.HAction.Run("CharShapeBold")
+            hwp.HAction.Run("CharShapeItalic")
+            hwp.HAction.Run("CharShapeUnderline")
+            hwp.MovePos(7)
+            if s_word in rest_map:
+                synonyms = ", ".join(rest_map[s_word])
+            hwp.HAction.Run("InsertEndnote")
+            hwp.HAction.GetDefault("InsertText", hwp.HParameterSet.HInsertText.HSet)
+            hwp.HParameterSet.HInsertText.Text = synonyms
+            hwp.HAction.Execute("InsertText", hwp.HParameterSet.HInsertText.HSet)
+            hwp.HAction.Run("CloseEx")
+            hwp.HAction.Run("BreakPara")
+            hwp.HAction.GetDefault("InsertText", hwp.HParameterSet.HInsertText.HSet)
+            hwp.HParameterSet.HInsertText.Text = " → "
+            hwp.HAction.Execute("InsertText", hwp.HParameterSet.HInsertText.HSet)
+            for j, hint in enumerate(rest_map[s_word]):
+                if " " not in hint:
+                    new_spara, new_spos, new_epara, new_epos = hwp.GetPos()[1], hwp.GetPos()[2] + 1, hwp.GetPos()[1], hwp.GetPos()[2] + 1 + len(hint)
+                    hwp.HAction.GetDefault("InsertText", hwp.HParameterSet.HInsertText.HSet)
+                    hwp.HParameterSet.HInsertText.Text = hint[0].lower() + " " * len(hint)
+                    hwp.HAction.Execute("InsertText", hwp.HParameterSet.HInsertText.HSet)
+                    hwp.SelectText(new_spara, new_spos, new_epara, new_epos)
+                    hwp.HAction.Run("CharShapeUnderline")
+                    hwp.MovePos(7)
+                    hwp.HAction.Run("CharShapeUnderline")
+                else:
+                    for h_word in hint.split():
+                        new_spara, new_spos, new_epara, new_epos = hwp.GetPos()[1], hwp.GetPos()[2] + 1, hwp.GetPos()[1], hwp.GetPos()[2] + 1 + len(h_word)
+                        hwp.HAction.GetDefault("InsertText", hwp.HParameterSet.HInsertText.HSet)
+                        hwp.HParameterSet.HInsertText.Text = h_word[0].lower() + " " * len(h_word) + " "
+                        hwp.HAction.Execute("InsertText", hwp.HParameterSet.HInsertText.HSet)
+                        hwp.SelectText(new_spara, new_spos, new_epara, new_epos)
+                        hwp.HAction.Run("CharShapeUnderline")
+                        hwp.MovePos(7)
+                    hwp.HAction.Run("CharShapeUnderline")
+
+                if j != len(rest_map[s_word]) - 1:
+                    hwp.HAction.GetDefault("InsertText", hwp.HParameterSet.HInsertText.HSet)
+                    hwp.HParameterSet.HInsertText.Text = ", "
+                    hwp.HAction.Execute("InsertText", hwp.HParameterSet.HInsertText.HSet)
+        hwp.HAction.Run("SelectAll")
+        hwp.HAction.Run("Copy")
+        hwp.HAction.Run("WindowNextTab")
+        hwp.SelectText(spara, spos, epara, epos)
+        hwp.HAction.Run("Delete")
+        hwp.HAction.Run("Paste")
+        hwp.DeleteCtrl(table)
+        hwp.XHwpDocuments.Item(1).SetActive_XHwpDocument()
+        hwp.XHwpDocuments.Item(1).Close(0)
+        
 if __name__ == "__main__":
     with HwpManager() as hwp:
         hwp.Open(os.path.join(os.getcwd(), "test.hwp"))
         window = hwp.XHwpWindows.Item(0)
         window.Visible = True
-
         all_results = extract_red_text(hwp)
-        tables = []
-        ctrl = hwp.HeadCtrl
-        while ctrl != None:
-            if ctrl.UserDesc == "표":
-                tables.append(ctrl)
-            ctrl = ctrl.Next
-        tables = tables[3:]
-        
-        for i,table in enumerate(tables):
-            first_words = {}
-            rest_map = {}
-            for group in all_results[i]:
-                if not group:
-                    continue
-                first, *rest = group
-                first_words[first] = -1
-                if rest:
-                    if isinstance(rest[0], str) and ',' in rest[0]:
-                        rest = [word.strip() for word in rest[0].split(',')]
-                    rest_map[first] = rest
-
-            if i == 0:
-                goto_pset = hwp.HParameterSet.HGotoE
-                hwp.HAction.GetDefault("Goto", goto_pset.HSet)
-                goto_pset.HSet.SetItem("DialogResult", 2)
-                goto_pset.SetSelectionIndex = 1
-                hwp.HAction.Execute("Goto", goto_pset.HSet)
-                spara = hwp.GetPos()[1]
-                spos = hwp.GetPos()[2]
-                hwp.SetPosBySet(tables[0].GetAnchorPos(0))
-                hwp.Run("MoveLeft")
-                epara = hwp.GetPos()[1]
-                epos = hwp.GetPos()[2]
-            else:
-                hwp.HAction.Run("MoveRight")
-                spara = hwp.GetPos()[1]
-                spos = hwp.GetPos()[2]
-                hwp.SetPosBySet(tables[1].GetAnchorPos(0))
-                hwp.Run("MoveLeft")
-                epara = hwp.GetPos()[1]
-                epos = hwp.GetPos()[2]
-
-            hwp.SelectText(spara, spos, epara, epos)
-            hwp.Run("Copy")
-            hwp.Run("FileNewTab")
-            hwp.Run("Paste")
-
-            find_replace_pset = hwp.HParameterSet.HFindReplace
-            word_positions = []
-            for word in first_words:
-                hwp.HAction.GetDefault("RepeatFind", find_replace_pset.HSet)
-                find_replace_pset.FindString = word
-                find_replace_pset.WholeWordOnly = 1
-                find_replace_pset.IgnoreMessage = 1
-                find_replace_pset.FindCharShape.TextColor = 0
-                hwp.HAction.Execute("RepeatFind", find_replace_pset.HSet)
-                print(word, hwp.GetPos())
-                word_positions.append((word, hwp.GetPos()))
-                hwp.HAction.Run("CharShapeBold")
-                hwp.HAction.Run("CharShapeItalic")
-                hwp.HAction.Run("CharShapeUnderline")
-            sorted_words = [word for word, _ in sorted(word_positions, key=lambda x: x[1])]
-
-
-        time.sleep(100)
-
+        create_synonym_questions_from_red_text(hwp, all_results)
+        hwp.SaveAs(os.path.join(os.getcwd(), "test_result.hwp"))
         
         hwp.Clear(1)
 
