@@ -1,279 +1,202 @@
-import os
-import sys
-import win32com.client
 import pythoncom
-from pyhwpx import Hwp
-from docx import Document
-from docx.shared import RGBColor
-import pyautogui
-import time
-import win32gui
-import win32con
+import win32com.client as win32
 
-def extract_red_text(input_file):
-    doc = Document(input_file)
-    all_results = []
-    for table in doc.tables:
-        table_results = []
-        for row in table.rows:
-            red_words = []
-            for cell in row.cells:
-                current_red_word = ""
-                in_red = False
-                for paragraph in cell.paragraphs:
-                    for run in paragraph.runs:
-                        if hasattr(run.font.color, 'rgb') and run.font.color.rgb == RGBColor(255, 0, 0):
-                            current_red_word += run.text
-                            in_red = True
-                        else:
-                            if in_red and current_red_word.strip():
-                                red_words.append(current_red_word.strip())
-                                current_red_word = ""
-                                in_red = False
-                if in_red and current_red_word.strip():
-                    red_words.append(current_red_word.strip())
-            if red_words:
-                table_results.append(red_words)
-        if table_results:
-            all_results.append(table_results)
-    return all_results
-
-def underline_all_fixed_spaces(doc, num_spaces=12):
-    target_text = " " * num_spaces
-    rng = doc.Content
-    rng.Find.ClearFormatting()
-    rng.Find.Text = target_text
-    while rng.Find.Execute():
-        rng.Font.Underline = True
-        rng.Collapse(0)
-def create_synonym_questions_in_range(range_obj, red_word_groups):
-    """
-    주어진 범위에 동의어 문제를 생성하는 함수
-    
-    Args:
-        range_obj: Word 문서의 Range 객체
-        red_word_groups: 이중 리스트 형태의 빨간색 단어 그룹
-            예: [["단어1", "동의어1", "동의어2"], ["단어2", "동의어3", "동의어4"]]
-    """
-    first_words = {}
-    rest_map = {}
-    for group in red_word_groups:
-        if not group:
-            continue
-        first, *rest = group
-        first_words[first] = -1
-        if rest:
-            if isinstance(rest[0], str) and ',' in rest[0]:
-                rest = [word.strip() for word in rest[0].split(',')]
-            rest_map[first] = rest
-    
-    word_positions = []
-    for word in first_words:
-        search_range = range_obj.Duplicate
-        search_range.Find.ClearFormatting()
-        search_range.Find.Text = word
-        search_range.Find.MatchWholeWord = True
-        search_range.Find.Forward = True
-        search_range.Find.Wrap = 1
+class HwpManager:
+    def __init__(self):
+        self.hwp = None
         
-        if search_range.Find.Execute():
-            search_range.Font.Bold = True
-            search_range.Font.Italic = True
-            search_range.Font.Underline = True
-            word_positions.append((word, search_range.Start))
-    
-    sorted_words = [word for word, _ in sorted(word_positions, key=lambda x: x[1])]
-    end_position = range_obj.End
-    range_obj.Document.Range(end_position, end_position).InsertAfter("\n")
-    end_position += 1 
-    
-    for word in sorted_words:
-        word_range = range_obj.Document.Range(end_position, end_position)
-        word_range.InsertAfter(word)
-        word_range.Font.Bold = True
-        word_range.Font.Italic = True
-        word_range.Font.Underline = True
-        word_range.Font.Name = "함초롬바탕"
-        word_range.Font.Size = 10
-        word_range.ParagraphFormat.LineSpacing = 24
-        end_position = word_range.End
-        question_range = range_obj.Document.Range(end_position, end_position)
-        question_range.InsertAfter(" 의 동의어를 쓰시오.")
-        question_range.Font.Name = "함초롬바탕"
-        question_range.Font.Italic = False
-        question_range.Font.Bold = False
-        question_range.Font.Underline = False
-        question_range.Font.Size = 10
-        question_range.ParagraphFormat.LineSpacing = 24
-        end_position = question_range.End
-        if word in rest_map:
-            synonyms = ", ".join(rest_map[word])
-            footnote_range = range_obj.Document.Range(end_position, end_position)
-            footnote = range_obj.Document.Footnotes.Add(Range=footnote_range, Text=synonyms)
-            footnote.Range.Font.Size = 9
-            footnote.Range.Font.Name = "맑은 고딕"
-            end_position = footnote_range.End + 1  
-        range_obj.Document.Range(end_position, end_position).InsertAfter("\n")
-        end_position += 1  
-        if word in rest_map:
-            processed_hints = []
-            for hint in rest_map[word]:
-                if not hint.strip():
-                    continue
-                if ' ' in hint:
-                    first_letters = [word[0].lower() for word in hint.split()]
-                    processed_hint = '    '.join(first_letters) + ' ' * 3
-                else:
-                    processed_hint = hint[0].lower() + ' ' * 12
-                
-                processed_hints.append(processed_hint)
-            
-            hint_text = " → " + ", ".join(processed_hints)
-            
-            hint_range = range_obj.Document.Range(end_position, end_position)
-            hint_range.InsertAfter(hint_text)
-            hint_range.Font.Name = "함초롬바탕"
-            hint_range.Font.Size = 10
-            hint_range.ParagraphFormat.LineSpacing = 24
-            end_position = hint_range.End
-            range_obj.Document.Range(end_position, end_position).InsertAfter("\n")
-            end_position += 1
-        range_obj.Document.Range(end_position, end_position).InsertAfter("\n")
-        end_position += 1 
+    def __enter__(self):
 
-def create_synonym_questions_from_red_text(word_file_path, red_word_groups):
-    word_app = None
-    doc = None
-    
-    try:
         pythoncom.CoInitialize()
+        self.hwp = win32.gencache.EnsureDispatch("HWPFrame.HwpObject")
+        self.hwp.RegisterModule("FilePathCheckDLL", "FilePathCheckerModule")
+        return self.hwp
         
+    def __exit__(self, exc_type, exc_val, exc_tb):
         try:
-            word_app = win32com.client.Dispatch("Word.Application")
-            word_app.Visible = False
-        except Exception as e:
-            print(f"Word 애플리케이션 초기화 실패: {str(e)}")
-            import subprocess
-            subprocess.run(['taskkill', '/F', '/IM', 'WINWORD.EXE'], capture_output=True)
-            word_app = win32com.client.Dispatch("Word.Application")
-            word_app.Visible = False
-        
-        doc = word_app.Documents.Open(
-            word_file_path,
-            ReadOnly=False,
-            Visible=False,
-            NoEncodingDialog=True
-        )
-        tables = doc.Tables
-
-        if tables.Count > 0:
-            for i in range(tables.Count):
-                current_table = tables.Item(i + 1)
-                
-                if i == 0:
-                    content_between_tables = doc.Range(0, current_table.Range.Start - 1)
-                else:
-                    previous_table = tables.Item(i)
-                    content_between_tables = doc.Range(previous_table.Range.End + 1, current_table.Range.Start - 1)
-                
-                create_synonym_questions_in_range(content_between_tables, red_word_groups[i])
-        
-        for table in tables:
-            table.Delete()
-
-        underline_all_fixed_spaces(doc)
-        underline_all_fixed_spaces(doc, 7)
-        underline_all_fixed_spaces(doc, 3)
-        
-        output_file_path = os.path.splitext(word_file_path)[0] + "_synonym_questions.docx"
-        doc.SaveAs(output_file_path)
-        
-        return output_file_path
-        
-    except Exception as e:
-        print(f"오류 발생: {str(e)}")
-        raise
-        
-    finally:
-        try:
-            if doc:
-                doc.Content.Copy()
-                doc.Close(SaveChanges=False)
-            if word_app:
-                word_app.Quit()
-        except Exception as e:
-            print(f"리소스 정리 중 오류: {str(e)}")
+            if self.hwp:
+                self.hwp.Quit()
+        except:
+            pass
         finally:
             pythoncom.CoUninitialize()
 
+def extract_red_text(hwp):
+    table_pos = []
+    ctrl = hwp.HeadCtrl
+    while ctrl != None:
+        if ctrl.UserDesc == "표":
+            hwp.SetPosBySet(ctrl.GetAnchorPos(0))
+            hwp.Run("MoveDown")
+            table_pos.append(hwp.GetPos()[0])
+        ctrl = ctrl.Next
+    table_pos = table_pos[3:]
+    all_results = [[] for _ in range(len(table_pos))]
+    find_replace_pset = hwp.HParameterSet.HFindReplace
+    hwp.HAction.GetDefault("RepeatFind", find_replace_pset.HSet)
+    find_replace_pset.FindCharShape.TextColor = 0x000000FF
+    find_replace_pset.IgnoreMessage = 1
+    find_replace_pset.FindType = 1   
 
-def save_as_hwp(input_file_path):
-    try:    
-        output_file_path = os.path.splitext(input_file_path)[0] + ".hwp"
-        
-        if os.path.exists(output_file_path):
-            os.remove(output_file_path)
-        
-        hwp = Hwp()        
-        pyautogui.hotkey('ctrl', 'alt', 'v')
-        time.sleep(0.5)
-        pyautogui.press(['down', 'down', 'enter'])
-        time.sleep(0.5)
-        
-        hwp.save_as(output_file_path)
-        hwp.quit()
-        time.sleep(0.5)
+    i = 0
+    row_check = 0
+    table_results = []
+    while hwp.HAction.Execute("RepeatFind", find_replace_pset.HSet):
+        # 표의 pos.list와 현재 pos.list가 같으면 새로운 리스트에 담을 준비
+        # 표를 한 번 처리했다면 table_result를 all_results에 담기
+        try:
+            i = table_pos.index(hwp.GetPos()[0])
+            if table_pos[i] == hwp.GetPos()[0]:
+                if table_results:  # 빈 리스트가 아닐 때만 추가
+                    all_results[i-1] = table_results
+                table_results = []
+        except ValueError:  # 구체적인 예외 처리
+            pass
 
-        if not os.path.exists(output_file_path):
-            raise Exception("HWP 파일 저장 실패")
-            
-        return output_file_path
+        # 2번 마다 새로운 리스트에 담을 준비
+        if row_check % 2 == 0:
+            row_results = []
         
-    except Exception as e:
-        print(f"HWP 변환 중 오류 발생: {str(e)}")
-        raise
-
-def hwp_to_docx(input_file_path: str) -> str:
-    if not input_file_path.lower().endswith(('.hwp', '.hwpx')):
-        raise ValueError("입력 파일은 .hwp 또는 .hwpx 형식이어야 합니다.")
+        text = hwp.GetTextFile('UNICODE', 'saveblock')
+        if text.strip():  # 빈 문자열이 아닐 때만 추가
+            # 쉼표로 분리하고 각 항목의 앞뒤 공백 제거, 빈 문자열 제외
+            words = [word.strip() for word in text.split(',') if word.strip()]
+            row_results.extend(words)  # extend를 사용하여 리스트에 개별 항목 추가
         
-    hwp = Hwp()
-    hwp.open(input_file_path)
-    time.sleep(0.5)
-    pyautogui.hotkey('ctrl', 'a')
-    pyautogui.hotkey('ctrl', 'c')
-    hwp.clear()
-    hwp.quit()
+        row_check += 1
+        if row_check % 2 == 0 and row_results:  # row_results가 비어있지 않을 때만 추가
+            table_results.append(row_results)
 
-    file_name = os.path.basename(input_file_path) 
-    output_file_path = os.path.join(os.getcwd(), file_name.replace('.hwp', '.docx').replace('.hwpx', '.docx'))  # 현재 경로에 저장
-    word = win32com.client.Dispatch("Word.Application")
-    word.Visible = True
-    
-    doc = word.Documents.Add()
-    time.sleep(1)
-    
-    def callback(hwnd, extra):
-        if win32gui.IsWindowVisible(hwnd):
-            title = win32gui.GetWindowText(hwnd)
-            if "Word" in title:
-                win32gui.SetForegroundWindow(hwnd)
-                win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
-                return False
-        return True
-    
-    win32gui.EnumWindows(callback, None)
-    time.sleep(0.5)
-    
-    pyautogui.hotkey('ctrl', 'v')
-    time.sleep(2)
-    pyautogui.press('ctrl')
-    time.sleep(1)
-    pyautogui.press('k')
-    time.sleep(0.5)
-    
-    doc.SaveAs(output_file_path)
-    doc.Close()
-    word.Quit()
+        hwp.HAction.GetDefault("RepeatFind", find_replace_pset.HSet)
+        find_replace_pset.FindCharShape.TextColor = 0x000000FF
+        find_replace_pset.IgnoreMessage = 1
+        find_replace_pset.FindType = 1
+    i = all_results.index([])
+    all_results[i] = table_results
+    return all_results
 
-    return output_file_path
+def create_synonym_questions_from_red_text(hwp, all_results):
+    tables = []
+    ctrl = hwp.HeadCtrl
+    while ctrl != None:
+        if ctrl.UserDesc == "표":
+            tables.append(ctrl)
+        ctrl = ctrl.Next
+    tables = tables[3:]
+
+    
+    for i,table in enumerate(tables):
+        first_words = {}
+        rest_map = {}
+        for group in all_results[i]:
+            if not group:
+                continue
+            first, *rest = group
+            first_words[first] = -1
+            if rest:
+                if isinstance(rest[0], str) and ',' in rest[0]:
+                    rest = [word.strip() for word in rest[0].split(',')]
+                rest_map[first] = rest
+        if i == 0:
+            goto_pset = hwp.HParameterSet.HGotoE
+            hwp.HAction.GetDefault("Goto", goto_pset.HSet)
+            goto_pset.HSet.SetItem("DialogResult", 2)
+            goto_pset.SetSelectionIndex = 1
+            hwp.HAction.Execute("Goto", goto_pset.HSet)
+            spara = hwp.GetPos()[1]
+            spos = hwp.GetPos()[2]
+            hwp.SetPosBySet(tables[0].GetAnchorPos(0))
+            hwp.Run("MoveLeft")
+            epara = hwp.GetPos()[1]
+            epos = hwp.GetPos()[2]
+        else:
+            hwp.HAction.Run("MoveRight")
+            spara = hwp.GetPos()[1]
+            spos = hwp.GetPos()[2]
+            hwp.SetPosBySet(tables[1].GetAnchorPos(0))
+            hwp.Run("MoveLeft")
+            epara = hwp.GetPos()[1]
+            epos = hwp.GetPos()[2]
+
+        hwp.SelectText(spara, spos, epara, epos)
+        hwp.Run("Copy")
+        hwp.Run("FileNewTab")
+        hwp.Run("Paste")
+
+        find_replace_pset = hwp.HParameterSet.HFindReplace
+        word_positions = []
+        for f_word in first_words:
+            hwp.HAction.GetDefault("RepeatFind", find_replace_pset.HSet)
+            find_replace_pset.FindString = f_word
+            find_replace_pset.WholeWordOnly = 1
+            find_replace_pset.IgnoreMessage = 1
+            find_replace_pset.FindCharShape.TextColor = 0
+            hwp.HAction.Execute("RepeatFind", find_replace_pset.HSet)
+            word_positions.append((f_word, hwp.GetPos()))
+            hwp.HAction.Run("CharShapeBold")
+            hwp.HAction.Run("CharShapeItalic")
+            hwp.HAction.Run("CharShapeUnderline")
+        sorted_words = [word for word, _ in sorted(word_positions, key=lambda x: x[1])]
+        hwp.MovePos(3)
+        hwp.HAction.Run("BreakPara")
+        act = hwp.CreateAction("ParagraphShape") 
+        pset = act.CreateSet() 
+        act.GetDefault(pset)  
+        pset.SetItem("LineSpacing", 200) 
+        act.Execute(pset)
+        for s_word in sorted_words:
+            hwp.HAction.Run("BreakPara")
+            new_spara, new_spos, new_epara, new_epos = hwp.GetPos()[1], hwp.GetPos()[2], hwp.GetPos()[1], hwp.GetPos()[2] + len(s_word)
+            hwp.HAction.GetDefault("InsertText", hwp.HParameterSet.HInsertText.HSet)
+            hwp.HParameterSet.HInsertText.Text = f"{s_word} 의 동의어를 쓰시오."
+            hwp.HAction.Execute("InsertText", hwp.HParameterSet.HInsertText.HSet)
+            hwp.SelectText(new_spara, new_spos, new_epara, new_epos)
+            hwp.HAction.Run("CharShapeBold")
+            hwp.HAction.Run("CharShapeItalic")
+            hwp.HAction.Run("CharShapeUnderline")
+            hwp.MovePos(7)
+            if s_word in rest_map:
+                synonyms = ", ".join(rest_map[s_word])
+            hwp.HAction.Run("InsertEndnote")
+            hwp.HAction.GetDefault("InsertText", hwp.HParameterSet.HInsertText.HSet)
+            hwp.HParameterSet.HInsertText.Text = synonyms
+            hwp.HAction.Execute("InsertText", hwp.HParameterSet.HInsertText.HSet)
+            hwp.HAction.Run("CloseEx")
+            hwp.HAction.Run("BreakPara")
+            hwp.HAction.GetDefault("InsertText", hwp.HParameterSet.HInsertText.HSet)
+            hwp.HParameterSet.HInsertText.Text = " → "
+            hwp.HAction.Execute("InsertText", hwp.HParameterSet.HInsertText.HSet)
+            for j, hint in enumerate(rest_map[s_word]):
+                if " " not in hint:
+                    new_spara, new_spos, new_epara, new_epos = hwp.GetPos()[1], hwp.GetPos()[2] + 1, hwp.GetPos()[1], hwp.GetPos()[2] + 1 + len(hint)
+                    hwp.HAction.GetDefault("InsertText", hwp.HParameterSet.HInsertText.HSet)
+                    hwp.HParameterSet.HInsertText.Text = hint[0].lower() + " " * len(hint)
+                    hwp.HAction.Execute("InsertText", hwp.HParameterSet.HInsertText.HSet)
+                    hwp.SelectText(new_spara, new_spos, new_epara, new_epos)
+                    hwp.HAction.Run("CharShapeUnderline")
+                    hwp.MovePos(7)
+                    hwp.HAction.Run("CharShapeUnderline")
+                else:
+                    for h_word in hint.split():
+                        new_spara, new_spos, new_epara, new_epos = hwp.GetPos()[1], hwp.GetPos()[2] + 1, hwp.GetPos()[1], hwp.GetPos()[2] + 1 + len(h_word)
+                        hwp.HAction.GetDefault("InsertText", hwp.HParameterSet.HInsertText.HSet)
+                        hwp.HParameterSet.HInsertText.Text = h_word[0].lower() + " " * len(h_word) + " "
+                        hwp.HAction.Execute("InsertText", hwp.HParameterSet.HInsertText.HSet)
+                        hwp.SelectText(new_spara, new_spos, new_epara, new_epos)
+                        hwp.HAction.Run("CharShapeUnderline")
+                        hwp.MovePos(7)
+                    hwp.HAction.Run("CharShapeUnderline")
+
+                if j != len(rest_map[s_word]) - 1:
+                    hwp.HAction.GetDefault("InsertText", hwp.HParameterSet.HInsertText.HSet)
+                    hwp.HParameterSet.HInsertText.Text = ", "
+                    hwp.HAction.Execute("InsertText", hwp.HParameterSet.HInsertText.HSet)
+        hwp.HAction.Run("SelectAll")
+        hwp.HAction.Run("Copy")
+        hwp.HAction.Run("WindowNextTab")
+        hwp.SelectText(spara, spos, epara, epos)
+        hwp.HAction.Run("Delete")
+        hwp.HAction.Run("Paste")
+        hwp.DeleteCtrl(table)
+        hwp.XHwpDocuments.Item(1).SetActive_XHwpDocument()
+        hwp.XHwpDocuments.Item(1).Close(0)

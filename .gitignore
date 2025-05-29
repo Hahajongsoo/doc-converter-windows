@@ -40,3 +40,6 @@ Thumbs.db
 *.hwp
 *.hwpx
 *.docx 
+
+# Test
+test.py

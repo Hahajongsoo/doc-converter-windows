@@ -1,2 +1,2 @@
-python-docx
-pywin32
+flask==2.0.1
+pywin32==305
