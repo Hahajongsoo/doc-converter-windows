@@ -6,6 +6,7 @@ class HwpManager:
         self.hwp = None
         
     def __enter__(self):
+
         pythoncom.CoInitialize()
         self.hwp = win32.gencache.EnsureDispatch("HWPFrame.HwpObject")
         self.hwp.RegisterModule("FilePathCheckDLL", "FilePathCheckerModule")
@@ -82,6 +83,7 @@ def create_synonym_questions_from_red_text(hwp, all_results):
             tables.append(ctrl)
         ctrl = ctrl.Next
     tables = tables[3:]
+
     
     for i,table in enumerate(tables):
         first_words = {}
